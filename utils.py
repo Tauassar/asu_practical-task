@@ -6,7 +6,7 @@ import re
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
-from settings import correct_file, incorrect_file, statistics_file
+from settings import correct_file, incorrect_file, statistics_file, organisational_forms
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +126,11 @@ def check_single_org_form(org_name, org_form):
     :param org_form: TOO ИП etc.
     :return:str converted form
     """
-    if re.search(' ' + org_form, org_name):
-        org_name = re.sub(' ' + org_form, '', org_name)
+    if re.search(org_form, org_name):
+        if re.search(' '+org_form, org_name):
+            org_name = re.sub(' ' + org_form, '', org_name)
+        else:
+            org_name = re.sub(org_form, '', org_name)
         logger.debug("{0} match".format(org_form))
         return '{0} {1}'.format(org_form, org_name)
     logger.debug("{0} no match".format(org_form))
@@ -141,8 +144,7 @@ def org_form_to_start(org_name):
     :param org_name:str name of organisation
     :return:str proceeded string
     """
-    org_forms = ['ТОО', 'ИП', 'ПК', 'АО', 'ООО', 'ЧП',
-                 'Частный нотариус', 'ТДО', 'КТ']
+    org_forms = organisational_forms
     for form in org_forms:
         out = check_single_org_form(org_name, form)
         if out:
