@@ -1,6 +1,12 @@
 import datetime
 import logging
+import os
 import re
+
+from openpyxl import Workbook
+from openpyxl.styles import Font
+
+from settings import correct_file
 
 logger = logging.getLogger(__name__)
 
@@ -59,29 +65,53 @@ def date_check(date):
     return True
 
 
-def check_bin(bin):
+def check_bin(bin_number):
     """
     Check whether bin is correct or not
-    :param bin:str actual bin number
+    :param bin_number:str actual bin number
     :return:bool True if correct, false otherwise
     """
     # registration date check
-    if not date_check(bin[0:4]): return False
+    if not date_check(bin_number[0:4]):
+        return False
     logger.debug('date check passed')
-    if int(bin[5]) not in [4, 5, 6]:
+    if int(bin_number[4]) not in [4, 5, 6]:
         logger.info('second part test failed')
         return False
-    if int(bin[6]) not in [0, 1, 2, 3]:
+    logger.debug('second check passed')
+    if int(bin_number[5]) not in [0, 1, 2, 3]:
+        logger.debug(int(bin_number[5]))
         logger.info('third part test failed')
         return False
-    logger.debug('third part test failed')
+    logger.debug('third part test passed')
 
     # no check for 4th part applied,
     # since there is no data about registration number
 
     # According to https://adilet.zan.kz/rus/docs/P030000565_
     # bin checked the same way as iin
-    return check_iin(bin)
+    return check_iin(bin_number)
+
+
+def iin_or_bin(number):
+    try:
+        if len(number) != 12:
+            logger.warning('Given IIN/BIN is too short: {0}'.format(number))
+            return False
+        int(number)
+        if int(number[4]) in [0, 1, 2, 3]:
+            return check_iin(number)
+        elif int(number[4]) in [4, 5, 6]:
+            return check_iin(number)
+        else:
+            logger.info(
+                '{0} does not match either IIN or BIN pattern'.format(number))
+            return False
+    except TypeError as e:
+        logger.warning('Error in bin_or_iin: {0}\n Number: {1}'.format(e, number))
+    except ValueError:
+        logger.warning('Given IIN/BIN is not a number: {0}'.format(number))
+        return False
 
 
 def check_single_org_form(org_name, org_form):
@@ -91,9 +121,11 @@ def check_single_org_form(org_name, org_form):
     :param org_form: TOO ИП etc.
     :return:str converted form
     """
-    if re.search(' '+org_form+' ', org_name):
-        org_name = re.sub(' '+org_form, '', org_name)
+    if re.search(' ' + org_form, org_name):
+        org_name = re.sub(' ' + org_form, '', org_name)
+        logger.debug("{0} match".format(org_form))
         return '{0} {1}'.format(org_form, org_name)
+    logger.debug("{0} no match".format(org_form))
     return None
 
 
@@ -114,5 +146,57 @@ def org_form_to_start(org_name):
     return org_name
 
 
-def fl_or_ul():
-    pass
+# ASSUME every person submitted IIN is 'ФЛ'
+# According to https://adilet.zan.kz/rus/docs/P030000565_
+# leading to the fact, that everybody with 0, 1, 2, 3, 6 are 'ФЛ'
+def fl_or_ul(bin_iin):
+    """
+    Checks whether organisation belongs to entity or actual person
+    :param bin_iin:str BIN number
+    :return:str type of organisation
+    """
+    logger.debug('{0} passed to fl_ul check'.format(bin_iin[4]))
+    if int(bin_iin[4]) in [0, 1, 2, 3, 6]:
+        return 'ФЛ'
+    elif int(bin_iin[4]) in [4, 5]:
+        return 'ЮЛ'
+    else:
+        logger.info('second part of IIN/BIN is out of scope')
+        return 'ERROR'
+
+
+def write_xlsx(inp_list):
+    book = Workbook()
+    sheet = book.active
+    a_width = 0
+    b_width = 0
+    corrupted_list = []
+    compensation = 2
+    heading = inp_list.pop(0)
+    sheet.cell(row=1, column=1).value = heading[0]
+    sheet.cell(row=1, column=2).value = org_form_to_start(heading[1])
+    sheet.cell(row=1, column=3).value = 'ФЛ/ЮЛ'
+    for cell_pos in ['A1', 'B1', 'C1']:
+        cell = sheet[cell_pos]
+        cell.font = Font(bold=True)
+    for i in range(len(inp_list)):
+        if not iin_or_bin(str(inp_list[i][0])):
+            corrupted_list.append(inp_list[i])
+            compensation -= 1
+            continue
+        sheet.cell(row=i + compensation, column=1).value = inp_list[i][0]
+        sheet.cell(row=i + compensation, column=2).value = org_form_to_start(inp_list[i][1])
+        sheet.cell(row=i + compensation, column=3).value = fl_or_ul(str(inp_list[i][0]))
+        a = len(str(inp_list[i][0]))
+        if a > a_width:
+            a_width = a
+        b = len(inp_list[i][1])
+        if b > b_width:
+            b_width = b
+    try:
+        sheet.column_dimensions['A'].width = a_width + 5
+        sheet.column_dimensions['B'].width = b_width + 5
+        book.save(correct_file)
+    except FileNotFoundError:
+        os.mkdir(re.findall("^[a-z, A-z]*/", correct_file)[0])
+        write_xlsx(inp_list)
