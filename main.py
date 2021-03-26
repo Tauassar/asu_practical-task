@@ -8,13 +8,18 @@ from openpyxl import load_workbook
 
 import log
 import settings
-from utils import org_form_to_start, write_xlsx, write_incorrect, write_statistics
+from utils import write_xlsx, write_incorrect, write_statistics
 
 log.setup_logging('DEBUG' if settings.DEBUG else 'INFO')
 logger = logging.getLogger(__name__)
 
 
 def process_xlsx(name, index):
+    """
+    run xlsx rendering functions, read from input file
+    :param name:str name of the file
+    :param index:int index of input file
+    """
     duplicates_count = 0
     visited = []
     wb = load_workbook(name)
@@ -35,6 +40,7 @@ def process_xlsx(name, index):
 
 
 if __name__ == '__main__':
+    """
+    main function
+    """
     process_xlsx(settings.inp_file, 0)
-    iin = 'Биг Рэд Интернэшнл КЗ  ТОО'
-    logger.debug(org_form_to_start(iin))
