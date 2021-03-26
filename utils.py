@@ -6,7 +6,7 @@ import re
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
-from settings import correct_file
+from settings import correct_file, incorrect_file, statistics_file
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,11 @@ def check_bin(bin_number):
 
 
 def iin_or_bin(number):
+    """
+    Check if given number is BIN or IIN and sends to appropriate function
+    :param number:str BIN/IIN number
+    :return:bool True if correct, false otherwise
+    """
     try:
         if len(number) != 12:
             logger.warning('Given IIN/BIN is too short: {0}'.format(number))
@@ -165,23 +170,79 @@ def fl_or_ul(bin_iin):
         return 'ERROR'
 
 
-def write_xlsx(inp_list):
+def make_bold(sheet, cells=('A1', 'B1', 'C1')):
+    """
+    Make upper title cells bold
+    :param sheet:object rendered sheet
+    """
+    for cell_pos in cells:
+        cell = sheet[cell_pos]
+        cell.font = Font(bold=True)
+
+
+def save_to_file(sheet, book, a_width, b_width, file_location):
+    """
+    Actual save function to save rendered sheets to file
+    :param sheet:object rendered sheet
+    :param book:object xlsx file needed to save
+    :param a_width:int column a width
+    :param b_width:int column a width
+    :param file_location:str location where file needed to save
+    """
+    try:
+        sheet.column_dimensions['A'].width = a_width + 5
+        sheet.column_dimensions['B'].width = b_width + 5
+        book.save(file_location)
+        logger.info(file_location + ' successfully rendered')
+    except FileNotFoundError:
+        os.mkdir(re.findall("^[a-z, A-z]*/", file_location)[0])
+        book.save(file_location)
+
+
+def write_incorrect(incorrect_list):
+    """
+    Write data to 'Некорректные БИН'
+    :param incorrect_list:list list of data with incorrect BIN/IIN
+    """
     book = Workbook()
     sheet = book.active
     a_width = 0
     b_width = 0
-    corrupted_list = []
+    sheet.cell(row=1, column=1).value = 'БИН/ИИН'
+    sheet.cell(row=1, column=2).value = 'Контрагент'
+    make_bold(sheet)
+    for i in range(len(incorrect_list)):
+        sheet.cell(row=i + 2, column=1).value = incorrect_list[i][0]
+        sheet.cell(row=i + 2, column=2).value = incorrect_list[i][1]
+        a = len(str(incorrect_list[i][0]))
+        if a > a_width:
+            a_width = a
+        b = len(incorrect_list[i][1])
+        if b > b_width:
+            b_width = b
+    save_to_file(sheet, book, a_width, b_width, incorrect_file)
+
+
+def write_xlsx(inp_list):
+    """
+    Write data to 'Итоговый файл'
+    :param inp_list:list list with no duplicates
+    :return:list list of data with incorrect IINs
+    """
+    book = Workbook()
+    sheet = book.active
+    a_width = 0
+    b_width = 0
+    incorrect_list = []
     compensation = 2
     heading = inp_list.pop(0)
     sheet.cell(row=1, column=1).value = heading[0]
     sheet.cell(row=1, column=2).value = org_form_to_start(heading[1])
     sheet.cell(row=1, column=3).value = 'ФЛ/ЮЛ'
-    for cell_pos in ['A1', 'B1', 'C1']:
-        cell = sheet[cell_pos]
-        cell.font = Font(bold=True)
+    make_bold(sheet)
     for i in range(len(inp_list)):
         if not iin_or_bin(str(inp_list[i][0])):
-            corrupted_list.append(inp_list[i])
+            incorrect_list.append(inp_list[i])
             compensation -= 1
             continue
         sheet.cell(row=i + compensation, column=1).value = inp_list[i][0]
@@ -193,10 +254,31 @@ def write_xlsx(inp_list):
         b = len(inp_list[i][1])
         if b > b_width:
             b_width = b
-    try:
-        sheet.column_dimensions['A'].width = a_width + 5
-        sheet.column_dimensions['B'].width = b_width + 5
-        book.save(correct_file)
-    except FileNotFoundError:
-        os.mkdir(re.findall("^[a-z, A-z]*/", correct_file)[0])
-        write_xlsx(inp_list)
+    save_to_file(sheet, book, a_width, b_width, correct_file)
+    return incorrect_list
+
+
+def write_statistics(filtered, duplcated, incorrect):
+    """
+    Write data to 'out/Статистика.xlsx'
+    :param filtered:int count of unique rows in input
+    :param duplcated:int count of non-unique rows in input
+    :param incorrect:int count of incorrect BIN/IIN
+    """
+    book = Workbook()
+    sheet = book.active
+    total = filtered + duplcated
+    a_width = len('Некорректные БИН')
+    b_width = 10
+    sheet.cell(row=1, column=1).value = 'Наименование'
+    sheet.cell(row=1, column=2).value = 'Значение'
+    sheet.cell(row=1, column=3).value = 'Процент'
+    make_bold(sheet)
+    names = ['Тотал', 'Без дупликатов', 'Дупликаты', 'Некорректные БИН']
+    values = [total, filtered, duplcated, incorrect]
+    for i in range(len(names)):
+        sheet.cell(row=i+2, column=1).value = names[i]
+        sheet.cell(row=i+2, column=2).value = values[i]
+        sheet.cell(row=i+2, column=3).value = '%.2f' % float(values[i] / total * 100)
+    sheet.column_dimensions['C'].width = 15
+    save_to_file(sheet, book, a_width, b_width, statistics_file)
